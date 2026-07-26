@@ -523,9 +523,37 @@
 
         /* Hide file input */
         #excelInput, #jsonInput { display: none; }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 3000;
+            padding: 15px 30px;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 14px;
+            display: none;
+            animation: slideDown 0.3s ease;
+        }
+
+        .toast.show { display: block; }
+        .toast.success { background: #43a047; }
+        .toast.error { background: #e53935; }
+        .toast.info { background: #1e88e5; }
+
+        @keyframes slideDown {
+            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
+            to { transform: translateX(-50%) translateY(0); opacity: 1; }
+        }
     </style>
 </head>
 <body>
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner"></div>
@@ -625,7 +653,7 @@
     <div class="modal-overlay" id="templateModal">
         <div class="modal-content">
             <h2><i class="fas fa-table"></i> قالب ملف Excel المطلوب</h2>
-            <p>يجب أن يحتوي ملف Excel على الأعمدة التالية بالضبط:</p>
+            <p>يجب أن يحتوي ملف Excel على الأعمدة التالية (الأعمدة باللون الأحمر اختيارية):</p>
 
             <table>
                 <tr>
@@ -638,13 +666,13 @@
                 <tr><td><b>Area</b></td><td>المنطقة</td><td>مدينة نصر</td></tr>
                 <tr><td><b>Shop_ID</b></td><td>كود المحل</td><td>S001</td></tr>
                 <tr><td><b>Shop_Name</b></td><td>اسم المحل</td><td>سوبر ماركت النور</td></tr>
-                <tr><td><b>Address</b></td><td>عنوان المحل</td><td>شارع عباس العقاد</td></tr>
+                <tr style="color:#e53935;"><td><b>Address</b></td><td>عنوان المحل (اختياري)</td><td>شارع عباس العقاد</td></tr>
                 <tr><td><b>Lat</b></td><td>خط العرض</td><td>30.0561</td></tr>
                 <tr><td><b>Lng</b></td><td>خط الطول</td><td>31.3304</td></tr>
                 <tr><td><b>Day</b></td><td>يوم الزيارة</td><td>السبت</td></tr>
             </table>
 
-            <p style="color:#e53935;"><i class="fas fa-exclamation-triangle"></i> ملاحظة: يمكنك تحميل قالب جاهز بالضغط على الزر أدناه.</p>
+            <p style="color:#e53935;"><i class="fas fa-exclamation-triangle"></i> ملاحظة: عمود Address اختياري. يمكنك تحميل قالب جاهز بالضغط على الزر أدناه.</p>
 
             <button class="modal-close" onclick="downloadTemplate()">
                 <i class="fas fa-download"></i> تحميل قالب Excel فارغ
@@ -676,7 +704,7 @@
         let currentTDM = null;
         let userPosition = null;
         let watchId = null;
-        let tdmData = {};  // Will be populated from Excel or default
+        let tdmData = {};
 
         // ===================== DEMO DATA (Default) =====================
         const defaultData = {
@@ -720,7 +748,6 @@
 
         // ===================== INIT =====================
         document.addEventListener('DOMContentLoaded', function() {
-            // Load from localStorage if exists
             const saved = localStorage.getItem('tdmData');
             if (saved) {
                 try {
@@ -754,7 +781,6 @@
 
         function populateTDMSelect() {
             const select = document.getElementById('tdmSelect');
-            // Keep first option
             select.innerHTML = '<option value="">-- اختر المندوب --</option>';
 
             for (const [code, data] of Object.entries(tdmData)) {
@@ -765,10 +791,22 @@
             }
         }
 
+        // ===================== TOAST =====================
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 4000);
+        }
+
         // ===================== EXCEL UPLOAD =====================
         function handleExcelUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
+
+            showToast('جاري قراءة الملف...', 'info');
 
             const reader = new FileReader();
             reader.onload = function(e) {
@@ -778,36 +816,50 @@
                     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
                     const jsonData = XLSX.utils.sheet_to_json(firstSheet);
 
+                    console.log('Excel parsed. Rows:', jsonData.length);
+                    console.log('First row:', jsonData[0]);
+                    console.log('Columns:', Object.keys(jsonData[0] || {}));
+
                     if (jsonData.length === 0) {
-                        alert('الملف فارغ!');
+                        showToast('الملف فارغ!', 'error');
                         return;
                     }
 
                     // Convert to tdmData format
                     const newData = {};
-                    const colors = ["#e53935", "#1e88e5", "#43a047", "#fb8c00", "#8e24aa", "#00acc1", "#d81b60", "#5e35b1"];
+                    const colors = ["#e53935", "#1e88e5", "#43a047", "#fb8c00", "#8e24aa", "#00acc1", "#d81b60", "#5e35b1", "#ff5722", "#795548"];
                     let colorIndex = 0;
+                    let skippedRows = 0;
+                    let validRows = 0;
 
                     jsonData.forEach((row, idx) => {
-                        const tdmCode = row.TDM_Code || row['TDM_Code'] || row['كود المندوب'];
-                        const tdmName = row.TDM_Name || row['TDM_Name'] || row['اسم المندوب'];
-                        const area = row.Area || row['Area'] || row['المنطقة'] || '';
-                        const shopId = row.Shop_ID || row['Shop_ID'] || row['كود المحل'] || `S${String(idx+1).padStart(3,'0')}`;
-                        const shopName = row.Shop_Name || row['Shop_Name'] || row['اسم المحل'];
-                        const address = row.Address || row['Address'] || row['العنوان'] || '';
-                        const lat = parseFloat(row.Lat || row['Lat'] || row['خط العرض']);
-                        const lng = parseFloat(row.Lng || row['Lng'] || row['خط الطول']);
-                        const day = row.Day || row['Day'] || row['اليوم'] || '';
+                        // Get values with fallbacks - handle both string and number types
+                        const tdmCode = String(getCellValue(row, ['TDM_Code', 'TDM Code', 'كود المندوب', 'كود_المندوب']) || '').trim();
+                        const tdmName = String(getCellValue(row, ['TDM_Name', 'TDM Name', 'اسم المندوب', 'اسم_المندوب']) || '').trim();
+                        const area = String(getCellValue(row, ['Area', 'المنطقة', 'منطقة']) || '').trim();
+                        const shopId = String(getCellValue(row, ['Shop_ID', 'Shop ID', 'كود المحل', 'كود_المحل']) || '').trim();
+                        const shopName = String(getCellValue(row, ['Shop_Name', 'Shop Name', 'اسم المحل', 'اسم_المحل']) || '').trim();
+                        const address = String(getCellValue(row, ['Address', 'العنوان', 'عنوان']) || '').trim();
+                        const lat = parseFloat(getCellValue(row, ['Lat', 'LAT', 'lat', 'خط العرض', 'خط_العرض']));
+                        const lng = parseFloat(getCellValue(row, ['Lng', 'LNG', 'lng', 'Lon', 'lon', 'خط الطول', 'خط_الطول']));
+                        const day = String(getCellValue(row, ['Day', 'DAY', 'day', 'اليوم', 'يوم']) || '').trim();
+
+                        // Skip header rows or invalid rows
+                        if (tdmCode.toLowerCase() === 'tdm_code' || tdmCode.toLowerCase() === 'كود المندوب') {
+                            skippedRows++;
+                            return;
+                        }
 
                         if (!tdmCode || !shopName || isNaN(lat) || isNaN(lng)) {
-                            console.warn('Skipping invalid row:', row);
+                            console.warn('Skipping row', idx, ': tdmCode=', tdmCode, 'shopName=', shopName, 'lat=', lat, 'lng=', lng);
+                            skippedRows++;
                             return;
                         }
 
                         if (!newData[tdmCode]) {
                             newData[tdmCode] = {
                                 name: tdmName || tdmCode,
-                                area: area,
+                                area: area || 'غير محدد',
                                 color: colors[colorIndex % colors.length],
                                 shops: []
                             };
@@ -815,17 +867,22 @@
                         }
 
                         newData[tdmCode].shops.push({
-                            id: shopId,
+                            id: shopId || `${tdmCode}-${idx}`,
                             name: shopName,
                             lat: lat,
                             lng: lng,
-                            address: address,
+                            address: address || area || '',
                             day: day
                         });
+
+                        validRows++;
                     });
 
+                    console.log('Valid rows:', validRows, 'Skipped:', skippedRows);
+                    console.log('TDMs found:', Object.keys(newData));
+
                     if (Object.keys(newData).length === 0) {
-                        alert('لم يتم العثور على بيانات صالحة! تأكد من أسماء الأعمدة.');
+                        showToast('لم يتم العثور على بيانات صالحة! تأكد من أسماء الأعمدة.', 'error');
                         return;
                     }
 
@@ -840,18 +897,33 @@
                     document.getElementById('statsBox').classList.remove('show');
                     document.getElementById('shopsSection').classList.remove('show');
 
+                    const totalShops = Object.values(newData).reduce((sum, t) => sum + t.shops.length, 0);
                     document.getElementById('fileInfo').innerHTML = 
-                        `✓ تم رفع ${Object.keys(newData).length} مندوب و ${jsonData.length} محل | <a href="#" onclick="showTemplateModal(); return false;" style="color:#64b5f6;">قالب Excel</a>`;
+                        `✓ ${Object.keys(newData).length} مندوب | ${totalShops} محل | <a href="#" onclick="showTemplateModal(); return false;" style="color:#64b5f6;">قالب</a>`;
 
-                    alert(`✅ تم رفع البيانات بنجاح!\n📊 ${Object.keys(newData).length} مندوب\n🏪 ${jsonData.length} محل`);
+                    showToast(`✅ تم رفع ${Object.keys(newData).length} مندوب و ${totalShops} محل بنجاح!`, 'success');
 
                 } catch (err) {
-                    console.error(err);
-                    alert('حدث خطأ في قراءة الملف! تأكد أنه ملف Excel صالح.\n\nتأكد من وجود الأعمدة: TDM_Code, TDM_Name, Shop_Name, Lat, Lng');
+                    console.error('Excel parse error:', err);
+                    showToast('حدث خطأ في قراءة الملف! ' + err.message, 'error');
                 }
+            };
+            reader.onerror = function(err) {
+                console.error('File read error:', err);
+                showToast('حدث خطأ في قراءة الملف!', 'error');
             };
             reader.readAsArrayBuffer(file);
             event.target.value = '';
+        }
+
+        // Helper to get cell value with multiple possible column names
+        function getCellValue(row, possibleKeys) {
+            for (const key of possibleKeys) {
+                if (row[key] !== undefined && row[key] !== null && row[key] !== '') {
+                    return row[key];
+                }
+            }
+            return undefined;
         }
 
         // ===================== EXPORT / IMPORT JSON =====================
@@ -866,6 +938,7 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+            showToast('تم تصدير البيانات!', 'success');
         }
 
         function handleJSONImport(event) {
@@ -888,14 +961,14 @@
 
                         const totalShops = Object.values(imported).reduce((sum, t) => sum + t.shops.length, 0);
                         document.getElementById('fileInfo').innerHTML = 
-                            `✓ تم استيراد ${Object.keys(imported).length} مندوب و ${totalShops} محل`;
+                            `✓ ${Object.keys(imported).length} مندوب | ${totalShops} محل`;
 
-                        alert(`✅ تم استيراد البيانات بنجاح!`);
+                        showToast('تم استيراد البيانات بنجاح!', 'success');
                     } else {
-                        alert('ملف JSON غير صالح!');
+                        showToast('ملف JSON غير صالح!', 'error');
                     }
                 } catch (err) {
-                    alert('حدث خطأ في قراءة ملف JSON!');
+                    showToast('حدث خطأ في قراءة ملف JSON!', 'error');
                 }
             };
             reader.readAsText(file);
@@ -903,7 +976,11 @@
         }
 
         function saveToLocalStorage() {
-            localStorage.setItem('tdmData', JSON.stringify(tdmData));
+            try {
+                localStorage.setItem('tdmData', JSON.stringify(tdmData));
+            } catch (e) {
+                console.warn('LocalStorage full or unavailable');
+            }
         }
 
         // ===================== TEMPLATE MODAL =====================
@@ -956,7 +1033,7 @@
             if (!navigator.geolocation) {
                 gpsText.textContent = "المتصفح لا يدعم GPS";
                 loadingOverlay.classList.add('hidden');
-                alert('متصفحك لا يدعم خاصية تحديد الموقع الجغرافي');
+                showToast('متصفحك لا يدعم GPS', 'error');
                 return;
             }
 
@@ -1032,13 +1109,13 @@
 
             switch(error.code) {
                 case error.PERMISSION_DENIED:
-                    message = "تم رفض الوصول للموقع - يرجى السماح من إعدادات المتصفح";
+                    message = "تم رفض الوصول للموقع";
                     break;
                 case error.POSITION_UNAVAILABLE:
-                    message = "الموقع غير متوفر حالياً";
+                    message = "الموقع غير متوفر";
                     break;
                 case error.TIMEOUT:
-                    message = "انتهى الوقت - جاري إعادة المحاولة...";
+                    message = "انتهى الوقت";
                     break;
             }
 
@@ -1085,7 +1162,7 @@
                 card.id = `shop-card-${shop.id}`;
                 card.innerHTML = `
                     <h4><i class="fas fa-store" style="color: ${tdm.color}; margin-left: 8px;"></i>${shop.name}</h4>
-                    <p><i class="fas fa-map-marker-alt" style="margin-left: 5px;"></i>${shop.address}</p>
+                    <p><i class="fas fa-map-marker-alt" style="margin-left: 5px;"></i>${shop.address || tdm.area}</p>
                     <div>
                         <span class="shop-code">${shop.id}</span>
                         ${shop.day ? `<span class="shop-day"><i class="fas fa-calendar-day" style="margin-left:3px;"></i>${shop.day}</span>` : ''}
@@ -1132,7 +1209,7 @@
                 const popupContent = `
                     <div class="custom-popup">
                         <h3><i class="fas fa-store" style="color: ${tdm.color};"></i> ${shop.name}</h3>
-                        <p><i class="fas fa-map-marker-alt"></i> ${shop.address}</p>
+                        <p><i class="fas fa-map-marker-alt"></i> ${shop.address || tdm.area}</p>
                         <p><i class="fas fa-barcode"></i> كود: ${shop.id}</p>
                         <p><i class="fas fa-user-tie"></i> المندوب: ${tdm.name}</p>
                         ${dayHtml}
@@ -1171,7 +1248,7 @@
         // ===================== NAVIGATION =====================
         function navigateToShop(shopId) {
             if (!userPosition) {
-                alert('لم يتم تحديد موقعك بعد! يرجى السماح بالوصول إلى GPS');
+                showToast('لم يتم تحديد موقعك! يرجى تفعيل GPS', 'error');
                 return;
             }
 
@@ -1215,7 +1292,7 @@
 
             currentRoutingControl.on('routingerror', function(e) {
                 console.error('Routing error:', e);
-                alert('حدث خطأ في حساب المسار. يرجى التحقق من الاتصال بالإنترنت.');
+                showToast('حدث خطأ في حساب المسار. تحقق من الاتصال.', 'error');
             });
         }
 
